@@ -5,6 +5,7 @@ import net.minecraft.launchwrapper.IClassTransformer;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -39,11 +40,11 @@ public class MOFCTransformer implements IClassTransformer {
             private boolean hasField;
 
             @Override
-            public void visitField(int access, String fname, String fdesc, String signature, Object value) {
+            public FieldVisitor visitField(int access, String fname, String fdesc, String signature, Object value) {
                 if (fname.equals("renderingMorphHand") && fdesc.equals("Z")) {
                     hasField = true;
                 }
-                super.visitField(access, fname, fdesc, signature, value);
+                return super.visitField(access, fname, fdesc, signature, value);
             }
 
             @Override
