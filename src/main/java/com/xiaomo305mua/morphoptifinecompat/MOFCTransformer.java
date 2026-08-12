@@ -27,11 +27,11 @@ public class MOFCTransformer implements IClassTransformer {
         }
         callCount++;
         if (callCount % 500 == 0) {
-            System.out.println("[MOFC] transform alive count=" + callCount);
+            System.out.println("[MOFC] alive count=" + callCount);
         }
         String n = name.replace('/', '.');
-        if (n.contains("morph") || n.contains("EventHandler") || n.contains("ModelHelper") || n.contains("GLAllocation")) {
-            System.out.println("[MOFC] saw: " + name);
+        if (n.contains("morph") || n.contains("ModelHelper") || n.contains("EventHandler")) {
+            System.out.println("[MOFC] transform name=" + name + " transformedName=" + transformedName);
         }
         try {
             String tn = transformedName == null ? "" : transformedName.replace('/', '.');
@@ -59,6 +59,12 @@ public class MOFCTransformer implements IClassTransformer {
             private boolean patched;
 
             @Override
+            public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+                System.out.println("[MOFC] EventHandler visit name=" + name);
+                super.visit(version, access, name.replace('.', '/'), signature, superName.replace('.', '/'), interfaces);
+            }
+
+            @Override
             public FieldVisitor visitField(int access, String fname, String fdesc, String signature, Object value) {
                 if (fname.equals("renderingMorphHand") && fdesc.equals("Z")) {
                     hasField = true;
@@ -84,7 +90,7 @@ public class MOFCTransformer implements IClassTransformer {
                 super.visitEnd();
                 System.out.println("[MOFC] EventHandler done patched=" + patched + " field=" + hasField);
             }
-        }, 0);
+        }, ClassReader.EXPAND_FRAMES);
         return cw.toByteArray();
     }
 
@@ -95,6 +101,12 @@ public class MOFCTransformer implements IClassTransformer {
 
             private boolean hasHelper;
             private int redirected;
+
+            @Override
+            public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
+                System.out.println("[MOFC] ModelHelper visit name=" + name);
+                super.visit(version, access, name.replace('.', '/'), signature, superName.replace('.', '/'), interfaces);
+            }
 
             @Override
             public MethodVisitor visitMethod(int access, String mname, String mdesc, String signature, String[] exceptions) {
@@ -126,7 +138,7 @@ public class MOFCTransformer implements IClassTransformer {
                 super.visitEnd();
                 System.out.println("[MOFC] ModelHelper done redirected=" + redirected + " helper=" + hasHelper);
             }
-        }, 0);
+        }, ClassReader.EXPAND_FRAMES);
         return cw.toByteArray();
     }
 
