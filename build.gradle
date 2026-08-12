@@ -27,7 +27,7 @@ minecraft {
     replace "@modVersion@", modVersion
     replace "@modDependencies@", "required-after:" + modDependencies + ";"
 
-    replaceIn "DARFCoreMod.java"
+    replaceIn "MOFCCoreMod.java"
     replace "@mcVersion@", project.minecraft.version
 }
 
