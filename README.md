@@ -1,5 +1,1 @@
-> **Note**
-> 这是一个普通的提示信息。
-
-> **Warning**
-> 这是一个警告信息。
+> :information_source: 这是提示
