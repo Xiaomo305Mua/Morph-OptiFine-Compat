@@ -3,224 +3,189 @@ package com.xiaomo305mua.morphoptifinecompat;
 import net.minecraft.launchwrapper.IClassTransformer;
 
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.FieldVisitor;
-import org.objectweb.asm.Label;
-import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
 public class MOFCTransformer implements IClassTransformer {
 
     private static final String EVENT_HANDLER = "morph.common.core.EventHandler";
+    private static final String EVENT_HANDLER_INTERNAL = "morph/common/core/EventHandler";
     private static final String MODEL_HELPER = "morph.client.model.ModelHelper";
+    private static final String MODEL_HELPER_INTERNAL = "morph/client/model/ModelHelper";
     private static final String RENDER_HAND_EVENT = "net/minecraftforge/client/event/RenderHandEvent";
     private static final String GL_ALLOCATION = "net/minecraft/client/renderer/GLAllocation";
     private static final String GL11 = "org/lwjgl/opengl/GL11";
-
-    private static int callCount;
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
         if (basicClass == null) {
             return null;
         }
-        callCount++;
-        if (callCount % 500 == 0) {
-            System.out.println("[MOFC] alive count=" + callCount);
-        }
         String n = name.replace('/', '.');
-        if (n.contains("morph") || n.contains("ModelHelper") || n.contains("EventHandler")) {
-            System.out.println("[MOFC] transform name=" + name + " transformedName=" + transformedName);
+        String tn = transformedName == null ? "" : transformedName.replace('/', '.');
+        if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
+            return patchEventHandler(basicClass);
         }
-        try {
-            String tn = transformedName == null ? "" : transformedName.replace('/', '.');
-            if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
-                System.out.println("[MOFC] patching EventHandler");
-                return patchEventHandler(basicClass);
-            }
-            if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
-                System.out.println("[MOFC] patching ModelHelper");
-                return patchModelHelper(basicClass);
-            }
-        } catch (Throwable t) {
-            System.out.println("[MOFC] patch threw: " + t);
-            t.printStackTrace();
+        if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
+            return patchModelHelper(basicClass);
         }
         return basicClass;
     }
 
-    private byte[] patchEventHandler(byte[] bytes) {
-        ClassReader cr = new ClassReader(bytes);
-        ClassWriter cw = new SafeClassWriter(ClassWriter.COMPUTE_MAXS);
-        cr.accept(new ClassVisitor(Opcodes.ASM4, cw) {
-
-            private boolean hasField;
-            private boolean patched;
-
-            @Override
-            public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
-                System.out.println("[MOFC] EventHandler visit name=" + name);
-                super.visit(version, access, name.replace('.', '/'), signature, superName.replace('.', '/'), interfaces);
-            }
-
-            @Override
-            public FieldVisitor visitField(int access, String fname, String fdesc, String signature, Object value) {
-                if (fname.equals("renderingMorphHand") && fdesc.equals("Z")) {
-                    hasField = true;
-                }
-                return super.visitField(access, fname, fdesc, signature, value);
-            }
-
-            @Override
-            public MethodVisitor visitMethod(int access, String mname, String mdesc, String signature, String[] exceptions) {
-                MethodVisitor mv = super.visitMethod(access, mname, mdesc, signature, exceptions);
-                if (mname.equals("onRenderHand") && mdesc.equals("(" + RENDER_HAND_EVENT + ")V")) {
-                    patched = true;
-                    return new GuardMethodVisitor(mv);
-                }
-                return mv;
-            }
-
-            @Override
-            public void visitEnd() {
-                if (!hasField) {
-                    super.visitField(Opcodes.ACC_PRIVATE, "renderingMorphHand", "Z", null, null);
-                }
-                super.visitEnd();
-                System.out.println("[MOFC] EventHandler done patched=" + patched + " field=" + hasField);
-            }
-        }, ClassReader.EXPAND_FRAMES);
-        return cw.toByteArray();
-    }
-
     private byte[] patchModelHelper(byte[] bytes) {
-        ClassReader cr = new ClassReader(bytes);
-        ClassWriter cw = new SafeClassWriter(ClassWriter.COMPUTE_MAXS);
-        cr.accept(new ClassVisitor(Opcodes.ASM4, cw) {
+        ClassNode classNode = new ClassNode();
+        new ClassReader(bytes).accept(classNode, 0);
 
-            private boolean hasHelper;
-            private int redirected;
-
-            @Override
-            public void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
-                System.out.println("[MOFC] ModelHelper visit name=" + name);
-                super.visit(version, access, name.replace('.', '/'), signature, superName.replace('.', '/'), interfaces);
+        int redirected = 0;
+        boolean hasHelper = false;
+        for (MethodNode method : classNode.methods) {
+            if ("deleteDisplayListSafe".equals(method.name) && "(I)V".equals(method.desc)) {
+                hasHelper = true;
             }
-
-            @Override
-            public MethodVisitor visitMethod(int access, String mname, String mdesc, String signature, String[] exceptions) {
-                MethodVisitor mv = super.visitMethod(access, mname, mdesc, signature, exceptions);
-                if (mname.equals("deleteDisplayListSafe") && mdesc.equals("(I)V")) {
-                    hasHelper = true;
-                }
-                return new MethodVisitor(Opcodes.ASM4, mv) {
-                    @Override
-                    public void visitMethodInsn(int opcode, String owner, String mname, String mdesc, boolean itf) {
-                        if (opcode == Opcodes.INVOKESTATIC
-                                && owner.equals(GL_ALLOCATION)
-                                && (mname.equals("func_74523_b") || mname.equals("deleteDisplayLists"))
-                                && mdesc.equals("(I)V")) {
-                            redirected++;
-                            super.visitMethodInsn(Opcodes.INVOKESTATIC, MODEL_HELPER, "deleteDisplayListSafe", "(I)V", false);
-                        } else {
-                            super.visitMethodInsn(opcode, owner, mname, mdesc, itf);
-                        }
+            for (AbstractInsnNode insn : method.instructions.toArray()) {
+                if (insn.getOpcode() == Opcodes.INVOKESTATIC && insn instanceof MethodInsnNode) {
+                    MethodInsnNode m = (MethodInsnNode) insn;
+                    if (GL_ALLOCATION.equals(m.owner)
+                            && ("func_74523_b".equals(m.name) || "deleteDisplayLists".equals(m.name))
+                            && "(I)V".equals(m.desc)) {
+                        m.owner = MODEL_HELPER_INTERNAL;
+                        m.name = "deleteDisplayListSafe";
+                        m.desc = "(I)V";
+                        redirected++;
                     }
-                };
-            }
-
-            @Override
-            public void visitEnd() {
-                if (!hasHelper) {
-                    addDeleteDisplayListSafe(super.visitMethod(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "deleteDisplayListSafe", "(I)V", null, null));
-                }
-                super.visitEnd();
-                System.out.println("[MOFC] ModelHelper done redirected=" + redirected + " helper=" + hasHelper);
-            }
-        }, ClassReader.EXPAND_FRAMES);
-        return cw.toByteArray();
-    }
-
-    private void addDeleteDisplayListSafe(MethodVisitor mv) {
-        Label ret = new Label();
-        Label start = new Label();
-        Label end = new Label();
-        Label handler = new Label();
-
-        mv.visitCode();
-        mv.visitVarInsn(Opcodes.ILOAD, 0);
-        mv.visitJumpInsn(Opcodes.IFLE, ret);
-        mv.visitTryCatchBlock(start, end, handler, "java/lang/NullPointerException");
-        mv.visitLabel(start);
-        mv.visitVarInsn(Opcodes.ILOAD, 0);
-        mv.visitMethodInsn(Opcodes.INVOKESTATIC, GL_ALLOCATION, "func_74523_b", "(I)V", false);
-        mv.visitLabel(end);
-        mv.visitJumpInsn(Opcodes.GOTO, ret);
-        mv.visitLabel(handler);
-        mv.visitInsn(Opcodes.POP);
-        mv.visitVarInsn(Opcodes.ILOAD, 0);
-        mv.visitInsn(Opcodes.ICONST_1);
-        mv.visitMethodInsn(Opcodes.INVOKESTATIC, GL11, "glDeleteLists", "(II)V", false);
-        mv.visitLabel(ret);
-        mv.visitInsn(Opcodes.RETURN);
-        mv.visitMaxs(0, 0);
-        mv.visitEnd();
-    }
-
-    private static class GuardMethodVisitor extends MethodVisitor {
-
-        private final Label start = new Label();
-        private final Label end = new Label();
-        private final Label handler = new Label();
-        private final Label skip = new Label();
-        private boolean endEmitted;
-
-        GuardMethodVisitor(MethodVisitor mv) {
-            super(Opcodes.ASM4, mv);
-        }
-
-        @Override
-        public void visitCode() {
-            super.visitCode();
-            mv.visitVarInsn(Opcodes.ALOAD, 0);
-            mv.visitFieldInsn(Opcodes.GETFIELD, EVENT_HANDLER, "renderingMorphHand", "Z");
-            mv.visitJumpInsn(Opcodes.IFNE, skip);
-            mv.visitVarInsn(Opcodes.ALOAD, 0);
-            mv.visitInsn(Opcodes.ICONST_1);
-            mv.visitFieldInsn(Opcodes.PUTFIELD, EVENT_HANDLER, "renderingMorphHand", "Z");
-            mv.visitTryCatchBlock(start, end, handler, "java/lang/Throwable");
-            mv.visitLabel(start);
-        }
-
-        @Override
-        public void visitInsn(int opcode) {
-            if (opcode == Opcodes.RETURN) {
-                mv.visitVarInsn(Opcodes.ALOAD, 0);
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTFIELD, EVENT_HANDLER, "renderingMorphHand", "Z");
-                if (!endEmitted) {
-                    mv.visitLabel(end);
-                    endEmitted = true;
                 }
             }
-            super.visitInsn(opcode);
         }
 
-        @Override
-        public void visitMaxs(int maxStack, int maxLocals) {
-            mv.visitLabel(handler);
-            mv.visitVarInsn(Opcodes.ALOAD, 0);
-            mv.visitInsn(Opcodes.ICONST_0);
-            mv.visitFieldInsn(Opcodes.PUTFIELD, EVENT_HANDLER, "renderingMorphHand", "Z");
-            mv.visitInsn(Opcodes.ATHROW);
-            mv.visitLabel(skip);
-            mv.visitInsn(Opcodes.RETURN);
-            super.visitMaxs(maxStack, maxLocals);
+        boolean patched = redirected > 0;
+        if (!hasHelper) {
+            classNode.methods.add(buildDeleteDisplayListSafe());
+            patched = true;
         }
+        if (!patched) {
+            return bytes;
+        }
+
+        ClassWriter writer = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        classNode.accept(writer);
+        return writer.toByteArray();
+    }
+
+    private static MethodNode buildDeleteDisplayListSafe() {
+        MethodNode method = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "deleteDisplayListSafe", "(I)V", null, null);
+        InsnList ins = method.instructions;
+        LabelNode ret = new LabelNode();
+        LabelNode start = new LabelNode();
+        LabelNode end = new LabelNode();
+        LabelNode handler = new LabelNode();
+
+        ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
+        ins.add(new JumpInsnNode(Opcodes.IFLE, ret));
+        ins.add(start);
+        ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
+        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL_ALLOCATION, "func_74523_b", "(I)V", false));
+        ins.add(end);
+        ins.add(new JumpInsnNode(Opcodes.GOTO, ret));
+        ins.add(handler);
+        ins.add(new InsnNode(Opcodes.POP));
+        ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
+        ins.add(new InsnNode(Opcodes.ICONST_1));
+        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL11, "glDeleteLists", "(II)V", false));
+        ins.add(ret);
+        ins.add(new InsnNode(Opcodes.RETURN));
+        method.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/NullPointerException"));
+        return method;
+    }
+
+    private byte[] patchEventHandler(byte[] bytes) {
+        ClassNode classNode = new ClassNode();
+        new ClassReader(bytes).accept(classNode, 0);
+
+        boolean hasField = false;
+        MethodNode target = null;
+        for (FieldNode field : classNode.fields) {
+            if ("renderingMorphHand".equals(field.name) && "Z".equals(field.desc)) {
+                hasField = true;
+            }
+        }
+        for (MethodNode method : classNode.methods) {
+            if ("onRenderHand".equals(method.name) && "(" + RENDER_HAND_EVENT + ")V".equals(method.desc)) {
+                target = method;
+            }
+        }
+
+        boolean patched = false;
+        if (!hasField) {
+            classNode.fields.add(new FieldNode(Opcodes.ACC_PRIVATE, "renderingMorphHand", "Z", null, null));
+            patched = true;
+        }
+        if (target != null) {
+            InsnList head = new InsnList();
+            LabelNode start = new LabelNode();
+            LabelNode end = new LabelNode();
+            LabelNode handler = new LabelNode();
+            LabelNode skip = new LabelNode();
+
+            head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            head.add(new FieldInsnNode(Opcodes.GETFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
+            head.add(new JumpInsnNode(Opcodes.IFNE, skip));
+            head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            head.add(new InsnNode(Opcodes.ICONST_1));
+            head.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
+            head.add(start);
+            target.instructions.insert(head);
+
+            boolean endEmitted = false;
+            for (AbstractInsnNode insn : target.instructions.toArray()) {
+                if (insn.getOpcode() == Opcodes.RETURN) {
+                    InsnList reset = new InsnList();
+                    if (!endEmitted) {
+                        reset.add(end);
+                        endEmitted = true;
+                    }
+                    reset.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                    reset.add(new InsnNode(Opcodes.ICONST_0));
+                    reset.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
+                    target.instructions.insertBefore(insn, reset);
+                }
+            }
+
+            InsnList tail = new InsnList();
+            tail.add(handler);
+            tail.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            tail.add(new InsnNode(Opcodes.ICONST_0));
+            tail.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
+            tail.add(new InsnNode(Opcodes.ATHROW));
+            tail.add(skip);
+            tail.add(new InsnNode(Opcodes.RETURN));
+            target.instructions.add(tail);
+
+            target.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
+            patched = true;
+        }
+        if (!patched) {
+            return bytes;
+        }
+
+        ClassWriter writer = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        classNode.accept(writer);
+        return writer.toByteArray();
     }
 
     private static class SafeClassWriter extends ClassWriter {
+
         SafeClassWriter(int flags) {
             super(flags);
         }
