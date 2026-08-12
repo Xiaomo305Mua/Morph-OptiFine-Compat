@@ -5,34 +5,21 @@ import net.minecraft.launchwrapper.IClassTransformer;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.FieldInsnNode;
-import org.objectweb.asm.tree.FieldNode;
-import org.objectweb.asm.tree.InsnList;
-import org.objectweb.asm.tree.InsnNode;
-import org.objectweb.asm.tree.JumpInsnNode;
-import org.objectweb.asm.tree.LabelNode;
-import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.TryCatchBlockNode;
-import org.objectweb.asm.tree.VarInsnNode;
+import org.objectweb.asm.tree.*;
 
 public class MOFCTransformer implements IClassTransformer {
 
     private static final String EVENT_HANDLER = "morph.common.core.EventHandler";
-    private static final String EVENT_HANDLER_INTERNAL = "morph/common/core/EventHandler";
+    private static final String EVENT_HANDLER_INTERNAL = EVENT_HANDLER.replace('.', '/');
     private static final String MODEL_HELPER = "morph.client.model.ModelHelper";
-    private static final String MODEL_HELPER_INTERNAL = "morph/client/model/ModelHelper";
-    private static final String RENDER_HAND_EVENT = "net/minecraftforge/client/event/RenderHandEvent";
+    private static final String MODEL_HELPER_INTERNAL = MODEL_HELPER.replace('.', '/');
+    private static final String RENDER_HAND_EVENT = "net.minecraftforge.client.event.RenderHandEvent";
     private static final String RENDER_HAND_DESC = "(L" + RENDER_HAND_EVENT + ";)V";
     private static final String GL_ALLOCATION = "net/minecraft/client/renderer/GLAllocation";
     private static final String GL11 = "org/lwjgl/opengl/GL11";
-
-    private static final String DELETE_DISPLAY_LIST_SRG = "func_74523_b";
-    private static final String DELETE_DISPLAY_LIST_MCP = "deleteDisplayLists";
-    private static final String HELPER_METHOD = "deleteDisplayListSafe";
-    private static final String GUARD_FIELD = "renderingMorphHand";
+    private static final String DELETE_DISPLAY_LIST = "func_74523_b";
+    private static final String HELPER = "deleteDisplayListSafe";
+    private static final String GUARD = "renderingMorphHand";
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
@@ -40,35 +27,34 @@ public class MOFCTransformer implements IClassTransformer {
             return null;
         }
         String n = name.replace('/', '.');
-        String tn = transformedName == null ? "" : transformedName.replace('/', '.');
-        if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
+        String t = transformedName == null ? "" : transformedName.replace('/', '.');
+        if (n.equals(EVENT_HANDLER) || t.equals(EVENT_HANDLER)) {
             return patchEventHandler(basicClass);
         }
-        if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
+        if (n.equals(MODEL_HELPER) || t.equals(MODEL_HELPER)) {
             return patchModelHelper(basicClass);
         }
         return basicClass;
     }
 
     private byte[] patchModelHelper(byte[] bytes) {
-        ClassNode classNode = new ClassNode();
-        new ClassReader(bytes).accept(classNode, 0);
+        ClassNode cn = read(bytes);
 
         boolean hasHelper = false;
         boolean redirected = false;
 
-        for (MethodNode method : classNode.methods) {
-            if (HELPER_METHOD.equals(method.name) && "(I)V".equals(method.desc)) {
+        for (MethodNode m : cn.methods) {
+            if (HELPER.equals(m.name) && "(I)V".equals(m.desc)) {
                 hasHelper = true;
             }
-            for (AbstractInsnNode insn : method.instructions.toArray()) {
-                if (insn.getOpcode() == Opcodes.INVOKESTATIC && insn instanceof MethodInsnNode) {
+            for (AbstractInsnNode insn : m.instructions.toArray()) {
+                if (insn.getOpcode() == Opcodes.INVOKESTATIC) {
                     MethodInsnNode call = (MethodInsnNode) insn;
                     if (GL_ALLOCATION.equals(call.owner)
-                            && (DELETE_DISPLAY_LIST_SRG.equals(call.name) || DELETE_DISPLAY_LIST_MCP.equals(call.name))
+                            && DELETE_DISPLAY_LIST.equals(call.name)
                             && "(I)V".equals(call.desc)) {
                         call.owner = MODEL_HELPER_INTERNAL;
-                        call.name = HELPER_METHOD;
+                        call.name = HELPER;
                         call.desc = "(I)V";
                         redirected = true;
                     }
@@ -76,22 +62,18 @@ public class MOFCTransformer implements IClassTransformer {
             }
         }
 
-        if (!hasHelper) {
-            classNode.methods.add(buildDeleteDisplayListSafe());
-        }
-        if (!redirected && hasHelper) {
+        if (!redirected) {
             return bytes;
         }
-
-        ClassWriter writer = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        classNode.accept(writer);
-        return writer.toByteArray();
+        if (!hasHelper) {
+            cn.methods.add(buildDeleteDisplayListSafe());
+        }
+        return write(cn);
     }
 
     private static MethodNode buildDeleteDisplayListSafe() {
-        MethodNode method = new MethodNode(
-                Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, HELPER_METHOD, "(I)V", null, null);
-        InsnList ins = method.instructions;
+        MethodNode m = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, HELPER, "(I)V", null, null);
+        InsnList ins = m.instructions;
         LabelNode ret = new LabelNode();
         LabelNode start = new LabelNode();
         LabelNode end = new LabelNode();
@@ -101,103 +83,102 @@ public class MOFCTransformer implements IClassTransformer {
         ins.add(new JumpInsnNode(Opcodes.IFLE, ret));
         ins.add(start);
         ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
-        ins.add(new MethodInsnNode(
-                Opcodes.INVOKESTATIC, GL_ALLOCATION, DELETE_DISPLAY_LIST_SRG, "(I)V", false));
+        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL_ALLOCATION, DELETE_DISPLAY_LIST, "(I)V", false));
         ins.add(end);
         ins.add(new JumpInsnNode(Opcodes.GOTO, ret));
         ins.add(handler);
         ins.add(new InsnNode(Opcodes.POP));
         ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
         ins.add(new InsnNode(Opcodes.ICONST_1));
-        ins.add(new MethodInsnNode(
-                Opcodes.INVOKESTATIC, GL11, "glDeleteLists", "(II)V", false));
+        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL11, "glDeleteLists", "(II)V", false));
         ins.add(ret);
         ins.add(new InsnNode(Opcodes.RETURN));
 
-        method.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/NullPointerException"));
-        return method;
+        m.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/NullPointerException"));
+        return m;
     }
 
     private byte[] patchEventHandler(byte[] bytes) {
-        ClassNode classNode = new ClassNode();
-        new ClassReader(bytes).accept(classNode, 0);
+        ClassNode cn = read(bytes);
 
         boolean hasField = false;
-        for (FieldNode field : classNode.fields) {
-            if (GUARD_FIELD.equals(field.name) && "Z".equals(field.desc)) {
-                hasField = true;
-                break;
-            }
-        }
-
         MethodNode target = null;
-        for (MethodNode method : classNode.methods) {
-            if ("onRenderHand".equals(method.name) && RENDER_HAND_DESC.equals(method.desc)) {
-                target = method;
-                break;
+
+        for (FieldNode f : cn.fields) {
+            if (GUARD.equals(f.name) && "Z".equals(f.desc)) {
+                hasField = true;
+            }
+        }
+        for (MethodNode m : cn.methods) {
+            if ("onRenderHand".equals(m.name) && RENDER_HAND_DESC.equals(m.desc)) {
+                target = m;
             }
         }
 
-        boolean patched = false;
-        if (!hasField) {
-            classNode.fields.add(new FieldNode(Opcodes.ACC_PRIVATE, GUARD_FIELD, "Z", null, null));
-            patched = true;
-        }
-        if (target != null) {
-            injectGuard(target);
-            patched = true;
-        }
-        if (!patched) {
+        if (target == null) {
             return bytes;
         }
-
-        ClassWriter writer = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
-        classNode.accept(writer);
-        return writer.toByteArray();
+        if (!hasField) {
+            cn.fields.add(new FieldNode(Opcodes.ACC_PRIVATE, GUARD, "Z", null, null));
+        }
+        injectGuard(target);
+        return write(cn);
     }
 
-    private void injectGuard(MethodNode target) {
-        InsnList head = new InsnList();
+    private static void injectGuard(MethodNode m) {
         LabelNode start = new LabelNode();
         LabelNode end = new LabelNode();
         LabelNode handler = new LabelNode();
         LabelNode skip = new LabelNode();
 
+        InsnList head = new InsnList();
         head.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        head.add(new FieldInsnNode(Opcodes.GETFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
+        head.add(new FieldInsnNode(Opcodes.GETFIELD, EVENT_HANDLER_INTERNAL, GUARD, "Z"));
         head.add(new JumpInsnNode(Opcodes.IFNE, skip));
-        head.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        head.add(new InsnNode(Opcodes.ICONST_1));
-        head.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
+        setFlag(head, true);
         head.add(start);
-        target.instructions.insert(head);
+        m.instructions.insert(head);
 
-        boolean endEmitted = false;
-        for (AbstractInsnNode insn : target.instructions.toArray()) {
+        boolean endSet = false;
+        for (AbstractInsnNode insn : m.instructions.toArray()) {
             if (insn.getOpcode() == Opcodes.RETURN) {
                 InsnList reset = new InsnList();
-                if (!endEmitted) {
+                if (!endSet) {
                     reset.add(end);
-                    endEmitted = true;
+                    endSet = true;
                 }
-                reset.add(new VarInsnNode(Opcodes.ALOAD, 0));
-                reset.add(new InsnNode(Opcodes.ICONST_0));
-                reset.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
-                target.instructions.insertBefore(insn, reset);
+                setFlag(reset, false);
+                m.instructions.insertBefore(insn, reset);
             }
         }
 
         InsnList tail = new InsnList();
         tail.add(handler);
-        tail.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        tail.add(new InsnNode(Opcodes.ICONST_0));
-        tail.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
+        setFlag(tail, false);
         tail.add(new InsnNode(Opcodes.ATHROW));
         tail.add(skip);
         tail.add(new InsnNode(Opcodes.RETURN));
-        target.instructions.add(tail);
+        m.instructions.add(tail);
 
-        target.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
+        m.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
+    }
+
+    private static void setFlag(InsnList list, boolean value) {
+        list.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        list.add(new InsnNode(value ? Opcodes.ICONST_1 : Opcodes.ICONST_0));
+        list.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, GUARD, "Z"));
+    }
+
+    private static ClassNode read(byte[] bytes) {
+        ClassNode cn = new ClassNode();
+        new ClassReader(bytes).accept(cn, 0);
+        return cn;
+    }
+
+    private static byte[] write(ClassNode cn) {
+        ClassWriter cw = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+        cn.accept(cw);
+        return cw.toByteArray();
     }
 
     private static class SafeClassWriter extends ClassWriter {
