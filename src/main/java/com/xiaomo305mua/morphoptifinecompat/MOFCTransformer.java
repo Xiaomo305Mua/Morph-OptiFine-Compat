@@ -28,6 +28,15 @@ public class MOFCTransformer implements IClassTransformer {
     private static final String GL_ALLOCATION = "net/minecraft/client/renderer/GLAllocation";
     private static final String GL11 = "org/lwjgl/opengl/GL11";
 
+    private static void log(String msg) {
+        try {
+            java.io.FileWriter fw = new java.io.FileWriter("mofc-debug.log", true);
+            fw.write(msg + "\n");
+            fw.close();
+        } catch (Throwable t) {
+        }
+    }
+
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
         if (basicClass == null) {
@@ -35,21 +44,21 @@ public class MOFCTransformer implements IClassTransformer {
         }
         String n = name.replace('/', '.');
         String tn = transformedName == null ? "" : transformedName.replace('/', '.');
-        if (n.contains("morph") || n.contains("EventHandler") || n.contains("ModelHelper")) {
-            System.out.println("[MOFC] transform name=" + name);
-        }
+        log("[MOFC] transform name=" + name);
         try {
             if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
-                System.out.println("[MOFC] patching EventHandler");
+                log("[MOFC] patching EventHandler");
                 return patchEventHandler(basicClass);
             }
             if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
-                System.out.println("[MOFC] patching ModelHelper");
+                log("[MOFC] patching ModelHelper");
                 return patchModelHelper(basicClass);
             }
         } catch (Throwable t) {
-            System.out.println("[MOFC] patch threw: " + t);
-            t.printStackTrace();
+            log("[MOFC] patch threw: " + t);
+            java.io.StringWriter sw = new java.io.StringWriter();
+            t.printStackTrace(new java.io.PrintWriter(sw));
+            log(sw.toString());
         }
         return basicClass;
     }
@@ -61,6 +70,7 @@ public class MOFCTransformer implements IClassTransformer {
         int redirected = 0;
         boolean hasHelper = false;
         for (MethodNode method : classNode.methods) {
+            log("[MOFC] ModelHelper method: " + method.name + method.desc);
             if ("deleteDisplayListSafe".equals(method.name) && "(I)V".equals(method.desc)) {
                 hasHelper = true;
             }
@@ -84,7 +94,7 @@ public class MOFCTransformer implements IClassTransformer {
             classNode.methods.add(buildDeleteDisplayListSafe());
             patched = true;
         }
-        System.out.println("[MOFC] ModelHelper redirected=" + redirected + " helper=" + hasHelper + " patched=" + patched);
+        log("[MOFC] ModelHelper redirected=" + redirected + " patched=" + patched);
         if (!patched) {
             return bytes;
         }
@@ -127,11 +137,13 @@ public class MOFCTransformer implements IClassTransformer {
         boolean hasField = false;
         MethodNode target = null;
         for (FieldNode field : classNode.fields) {
+            log("[MOFC] EventHandler field: " + field.name + " : " + field.desc);
             if ("renderingMorphHand".equals(field.name) && "Z".equals(field.desc)) {
                 hasField = true;
             }
         }
         for (MethodNode method : classNode.methods) {
+            log("[MOFC] EventHandler method: " + method.name + method.desc);
             if ("onRenderHand".equals(method.name) && ("(" + RENDER_HAND_EVENT + ")V").equals(method.desc)) {
                 target = method;
             }
@@ -186,7 +198,7 @@ public class MOFCTransformer implements IClassTransformer {
             target.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
             patched = true;
         }
-        System.out.println("[MOFC] EventHandler field=" + hasField + " target=" + (target != null) + " patched=" + patched);
+        log("[MOFC] EventHandler field=" + hasField + " target=" + (target != null) + " patched=" + patched);
         if (!patched) {
             return bytes;
         }
