@@ -13,11 +13,11 @@ public class MOFCTransformer implements IClassTransformer {
     private static final String EVENT_HANDLER_INTERNAL = EVENT_HANDLER.replace('.', '/');
     private static final String MODEL_HELPER = "morph.client.model.ModelHelper";
     private static final String MODEL_HELPER_INTERNAL = MODEL_HELPER.replace('.', '/');
-    private static final String RENDER_HAND_EVENT = "net.minecraftforge.client.event.RenderHandEvent";
-    private static final String RENDER_HAND_DESC = "(L" + RENDER_HAND_EVENT + ";)V";
+    private static final String RENDER_HAND_METHOD = "onRenderHand";
     private static final String GL_ALLOCATION = "net/minecraft/client/renderer/GLAllocation";
     private static final String GL11 = "org/lwjgl/opengl/GL11";
-    private static final String DELETE_DISPLAY_LIST = "func_74523_b";
+    private static final String DELETE_DISPLAY_LIST_SRG = "func_74523_b";
+    private static final String DELETE_DISPLAY_LIST_MCP = "deleteDisplayLists";
     private static final String HELPER = "deleteDisplayListSafe";
     private static final String GUARD = "renderingMorphHand";
 
@@ -26,13 +26,16 @@ public class MOFCTransformer implements IClassTransformer {
         if (basicClass == null) {
             return null;
         }
-        String n = name.replace('/', '.');
-        String t = transformedName == null ? "" : transformedName.replace('/', '.');
-        if (n.equals(EVENT_HANDLER) || t.equals(EVENT_HANDLER)) {
-            return patchEventHandler(basicClass);
-        }
-        if (n.equals(MODEL_HELPER) || t.equals(MODEL_HELPER)) {
-            return patchModelHelper(basicClass);
+        try {
+            String n = name.replace('/', '.');
+            String t = transformedName == null ? "" : transformedName.replace('/', '.');
+            if (n.equals(EVENT_HANDLER) || t.equals(EVENT_HANDLER)) {
+                return patchEventHandler(basicClass);
+            }
+            if (n.equals(MODEL_HELPER) || t.equals(MODEL_HELPER)) {
+                return patchModelHelper(basicClass);
+            }
+        } catch (Throwable ignored) {
         }
         return basicClass;
     }
@@ -51,7 +54,7 @@ public class MOFCTransformer implements IClassTransformer {
                 if (insn.getOpcode() == Opcodes.INVOKESTATIC) {
                     MethodInsnNode call = (MethodInsnNode) insn;
                     if (GL_ALLOCATION.equals(call.owner)
-                            && DELETE_DISPLAY_LIST.equals(call.name)
+                            && (DELETE_DISPLAY_LIST_SRG.equals(call.name) || DELETE_DISPLAY_LIST_MCP.equals(call.name))
                             && "(I)V".equals(call.desc)) {
                         call.owner = MODEL_HELPER_INTERNAL;
                         call.name = HELPER;
@@ -83,7 +86,7 @@ public class MOFCTransformer implements IClassTransformer {
         ins.add(new JumpInsnNode(Opcodes.IFLE, ret));
         ins.add(start);
         ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
-        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL_ALLOCATION, DELETE_DISPLAY_LIST, "(I)V", false));
+        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL_ALLOCATION, DELETE_DISPLAY_LIST_SRG, "(I)V", false));
         ins.add(end);
         ins.add(new JumpInsnNode(Opcodes.GOTO, ret));
         ins.add(handler);
@@ -110,7 +113,7 @@ public class MOFCTransformer implements IClassTransformer {
             }
         }
         for (MethodNode m : cn.methods) {
-            if ("onRenderHand".equals(m.name) && RENDER_HAND_DESC.equals(m.desc)) {
+            if (RENDER_HAND_METHOD.equals(m.name)) {
                 target = m;
             }
         }
