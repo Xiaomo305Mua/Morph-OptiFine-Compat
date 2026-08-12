@@ -20,4 +20,4 @@ Supports any version of Morph and its forks.
 
 ## License
 
-This project is licensed under the [LGPL-3.0](./LICENSE.txt).
+This project is licensed under the [LGPL-3.0](./LICENSE).
