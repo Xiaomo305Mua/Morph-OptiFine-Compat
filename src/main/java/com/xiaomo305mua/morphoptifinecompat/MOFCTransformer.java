@@ -52,7 +52,7 @@ public class MOFCTransformer implements IClassTransformer {
 
     private byte[] patchEventHandler(byte[] bytes) {
         ClassReader cr = new ClassReader(bytes);
-        ClassWriter cw = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES);
+        ClassWriter cw = new SafeClassWriter(ClassWriter.COMPUTE_MAXS);
         cr.accept(new ClassVisitor(Opcodes.ASM4, cw) {
 
             private boolean hasField;
@@ -96,7 +96,7 @@ public class MOFCTransformer implements IClassTransformer {
 
     private byte[] patchModelHelper(byte[] bytes) {
         ClassReader cr = new ClassReader(bytes);
-        ClassWriter cw = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES);
+        ClassWriter cw = new SafeClassWriter(ClassWriter.COMPUTE_MAXS);
         cr.accept(new ClassVisitor(Opcodes.ASM4, cw) {
 
             private boolean hasHelper;
