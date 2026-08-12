@@ -144,7 +144,7 @@ public class MOFCTransformer implements IClassTransformer {
         }
         for (MethodNode method : classNode.methods) {
             log("[MOFC] EventHandler method: " + method.name + method.desc);
-            if ("onRenderHand".equals(method.name) && ("(" + RENDER_HAND_EVENT + ")V").equals(method.desc)) {
+            if ("onRenderHand".equals(method.name) && ("(L" + RENDER_HAND_EVENT + ";)V").equals(method.desc)) {
                 target = method;
             }
         }
