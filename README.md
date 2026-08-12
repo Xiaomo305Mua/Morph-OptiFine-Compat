@@ -6,7 +6,7 @@
   <img src="resources/Logo.png" width="256">
 </p>
 
-使 [变身](https://www.curseforge.com/minecraft/mc-mods/morph) 兼容 [高清修复](https://optifine.net/home)
+使 [变身](https://www.curseforge.com/minecraft/mc-mods/morph) 兼容 [高清修复](https://optifine.net/home) 1.7.10 Forge
 
 支持任意版本的变身及其分支
 
