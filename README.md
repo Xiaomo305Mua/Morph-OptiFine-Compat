@@ -1,2 +1,5 @@
-# Morph-OptiFine-Compat
-test
+> **Note**
+> 这是一个普通的提示信息。
+
+> **Warning**
+> 这是一个警告信息。
