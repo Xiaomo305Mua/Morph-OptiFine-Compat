@@ -121,7 +121,7 @@ public class MOFCTransformer implements IClassTransformer {
             }
         }
         for (MethodNode method : classNode.methods) {
-            if ("onRenderHand".equals(method.name) && "(" + RENDER_HAND_EVENT + ")V".equals(method.desc)) {
+            if ("onRenderHand".equals(method.name) && ("(" + RENDER_HAND_EVENT + ")V").equals(method.desc)) {
                 target = method;
             }
         }
