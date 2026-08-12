@@ -25,17 +25,14 @@ public class MOFCTransformer implements IClassTransformer {
     private static final String MODEL_HELPER = "morph.client.model.ModelHelper";
     private static final String MODEL_HELPER_INTERNAL = "morph/client/model/ModelHelper";
     private static final String RENDER_HAND_EVENT = "net/minecraftforge/client/event/RenderHandEvent";
+    private static final String RENDER_HAND_DESC = "(L" + RENDER_HAND_EVENT + ";)V";
     private static final String GL_ALLOCATION = "net/minecraft/client/renderer/GLAllocation";
     private static final String GL11 = "org/lwjgl/opengl/GL11";
 
-    private static void log(String msg) {
-        try {
-            java.io.FileWriter fw = new java.io.FileWriter("mofc-debug.log", true);
-            fw.write(msg + "\n");
-            fw.close();
-        } catch (Throwable t) {
-        }
-    }
+    private static final String DELETE_DISPLAY_LIST_SRG = "func_74523_b";
+    private static final String DELETE_DISPLAY_LIST_MCP = "deleteDisplayLists";
+    private static final String HELPER_METHOD = "deleteDisplayListSafe";
+    private static final String GUARD_FIELD = "renderingMorphHand";
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
@@ -44,21 +41,11 @@ public class MOFCTransformer implements IClassTransformer {
         }
         String n = name.replace('/', '.');
         String tn = transformedName == null ? "" : transformedName.replace('/', '.');
-        log("[MOFC] transform name=" + name);
-        try {
-            if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
-                log("[MOFC] patching EventHandler");
-                return patchEventHandler(basicClass);
-            }
-            if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
-                log("[MOFC] patching ModelHelper");
-                return patchModelHelper(basicClass);
-            }
-        } catch (Throwable t) {
-            log("[MOFC] patch threw: " + t);
-            java.io.StringWriter sw = new java.io.StringWriter();
-            t.printStackTrace(new java.io.PrintWriter(sw));
-            log(sw.toString());
+        if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
+            return patchEventHandler(basicClass);
+        }
+        if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
+            return patchModelHelper(basicClass);
         }
         return basicClass;
     }
@@ -67,35 +54,32 @@ public class MOFCTransformer implements IClassTransformer {
         ClassNode classNode = new ClassNode();
         new ClassReader(bytes).accept(classNode, 0);
 
-        int redirected = 0;
         boolean hasHelper = false;
+        boolean redirected = false;
+
         for (MethodNode method : classNode.methods) {
-            log("[MOFC] ModelHelper method: " + method.name + method.desc);
-            if ("deleteDisplayListSafe".equals(method.name) && "(I)V".equals(method.desc)) {
+            if (HELPER_METHOD.equals(method.name) && "(I)V".equals(method.desc)) {
                 hasHelper = true;
             }
             for (AbstractInsnNode insn : method.instructions.toArray()) {
                 if (insn.getOpcode() == Opcodes.INVOKESTATIC && insn instanceof MethodInsnNode) {
-                    MethodInsnNode m = (MethodInsnNode) insn;
-                    if (GL_ALLOCATION.equals(m.owner)
-                            && ("func_74523_b".equals(m.name) || "deleteDisplayLists".equals(m.name))
-                            && "(I)V".equals(m.desc)) {
-                        m.owner = MODEL_HELPER_INTERNAL;
-                        m.name = "deleteDisplayListSafe";
-                        m.desc = "(I)V";
-                        redirected++;
+                    MethodInsnNode call = (MethodInsnNode) insn;
+                    if (GL_ALLOCATION.equals(call.owner)
+                            && (DELETE_DISPLAY_LIST_SRG.equals(call.name) || DELETE_DISPLAY_LIST_MCP.equals(call.name))
+                            && "(I)V".equals(call.desc)) {
+                        call.owner = MODEL_HELPER_INTERNAL;
+                        call.name = HELPER_METHOD;
+                        call.desc = "(I)V";
+                        redirected = true;
                     }
                 }
             }
         }
 
-        boolean patched = redirected > 0;
         if (!hasHelper) {
             classNode.methods.add(buildDeleteDisplayListSafe());
-            patched = true;
         }
-        log("[MOFC] ModelHelper redirected=" + redirected + " patched=" + patched);
-        if (!patched) {
+        if (!redirected && hasHelper) {
             return bytes;
         }
 
@@ -105,7 +89,8 @@ public class MOFCTransformer implements IClassTransformer {
     }
 
     private static MethodNode buildDeleteDisplayListSafe() {
-        MethodNode method = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "deleteDisplayListSafe", "(I)V", null, null);
+        MethodNode method = new MethodNode(
+                Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, HELPER_METHOD, "(I)V", null, null);
         InsnList ins = method.instructions;
         LabelNode ret = new LabelNode();
         LabelNode start = new LabelNode();
@@ -116,16 +101,19 @@ public class MOFCTransformer implements IClassTransformer {
         ins.add(new JumpInsnNode(Opcodes.IFLE, ret));
         ins.add(start);
         ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
-        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL_ALLOCATION, "func_74523_b", "(I)V", false));
+        ins.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC, GL_ALLOCATION, DELETE_DISPLAY_LIST_SRG, "(I)V", false));
         ins.add(end);
         ins.add(new JumpInsnNode(Opcodes.GOTO, ret));
         ins.add(handler);
         ins.add(new InsnNode(Opcodes.POP));
         ins.add(new VarInsnNode(Opcodes.ILOAD, 0));
         ins.add(new InsnNode(Opcodes.ICONST_1));
-        ins.add(new MethodInsnNode(Opcodes.INVOKESTATIC, GL11, "glDeleteLists", "(II)V", false));
+        ins.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC, GL11, "glDeleteLists", "(II)V", false));
         ins.add(ret);
         ins.add(new InsnNode(Opcodes.RETURN));
+
         method.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/NullPointerException"));
         return method;
     }
@@ -135,70 +123,30 @@ public class MOFCTransformer implements IClassTransformer {
         new ClassReader(bytes).accept(classNode, 0);
 
         boolean hasField = false;
-        MethodNode target = null;
         for (FieldNode field : classNode.fields) {
-            log("[MOFC] EventHandler field: " + field.name + " : " + field.desc);
-            if ("renderingMorphHand".equals(field.name) && "Z".equals(field.desc)) {
+            if (GUARD_FIELD.equals(field.name) && "Z".equals(field.desc)) {
                 hasField = true;
+                break;
             }
         }
+
+        MethodNode target = null;
         for (MethodNode method : classNode.methods) {
-            log("[MOFC] EventHandler method: " + method.name + method.desc);
-            if ("onRenderHand".equals(method.name) && ("(L" + RENDER_HAND_EVENT + ";)V").equals(method.desc)) {
+            if ("onRenderHand".equals(method.name) && RENDER_HAND_DESC.equals(method.desc)) {
                 target = method;
+                break;
             }
         }
 
         boolean patched = false;
         if (!hasField) {
-            classNode.fields.add(new FieldNode(Opcodes.ACC_PRIVATE, "renderingMorphHand", "Z", null, null));
+            classNode.fields.add(new FieldNode(Opcodes.ACC_PRIVATE, GUARD_FIELD, "Z", null, null));
             patched = true;
         }
         if (target != null) {
-            InsnList head = new InsnList();
-            LabelNode start = new LabelNode();
-            LabelNode end = new LabelNode();
-            LabelNode handler = new LabelNode();
-            LabelNode skip = new LabelNode();
-
-            head.add(new VarInsnNode(Opcodes.ALOAD, 0));
-            head.add(new FieldInsnNode(Opcodes.GETFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
-            head.add(new JumpInsnNode(Opcodes.IFNE, skip));
-            head.add(new VarInsnNode(Opcodes.ALOAD, 0));
-            head.add(new InsnNode(Opcodes.ICONST_1));
-            head.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
-            head.add(start);
-            target.instructions.insert(head);
-
-            boolean endEmitted = false;
-            for (AbstractInsnNode insn : target.instructions.toArray()) {
-                if (insn.getOpcode() == Opcodes.RETURN) {
-                    InsnList reset = new InsnList();
-                    if (!endEmitted) {
-                        reset.add(end);
-                        endEmitted = true;
-                    }
-                    reset.add(new VarInsnNode(Opcodes.ALOAD, 0));
-                    reset.add(new InsnNode(Opcodes.ICONST_0));
-                    reset.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
-                    target.instructions.insertBefore(insn, reset);
-                }
-            }
-
-            InsnList tail = new InsnList();
-            tail.add(handler);
-            tail.add(new VarInsnNode(Opcodes.ALOAD, 0));
-            tail.add(new InsnNode(Opcodes.ICONST_0));
-            tail.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, "renderingMorphHand", "Z"));
-            tail.add(new InsnNode(Opcodes.ATHROW));
-            tail.add(skip);
-            tail.add(new InsnNode(Opcodes.RETURN));
-            target.instructions.add(tail);
-
-            target.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
+            injectGuard(target);
             patched = true;
         }
-        log("[MOFC] EventHandler field=" + hasField + " target=" + (target != null) + " patched=" + patched);
         if (!patched) {
             return bytes;
         }
@@ -206,6 +154,50 @@ public class MOFCTransformer implements IClassTransformer {
         ClassWriter writer = new SafeClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         classNode.accept(writer);
         return writer.toByteArray();
+    }
+
+    private void injectGuard(MethodNode target) {
+        InsnList head = new InsnList();
+        LabelNode start = new LabelNode();
+        LabelNode end = new LabelNode();
+        LabelNode handler = new LabelNode();
+        LabelNode skip = new LabelNode();
+
+        head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        head.add(new FieldInsnNode(Opcodes.GETFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
+        head.add(new JumpInsnNode(Opcodes.IFNE, skip));
+        head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        head.add(new InsnNode(Opcodes.ICONST_1));
+        head.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
+        head.add(start);
+        target.instructions.insert(head);
+
+        boolean endEmitted = false;
+        for (AbstractInsnNode insn : target.instructions.toArray()) {
+            if (insn.getOpcode() == Opcodes.RETURN) {
+                InsnList reset = new InsnList();
+                if (!endEmitted) {
+                    reset.add(end);
+                    endEmitted = true;
+                }
+                reset.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                reset.add(new InsnNode(Opcodes.ICONST_0));
+                reset.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
+                target.instructions.insertBefore(insn, reset);
+            }
+        }
+
+        InsnList tail = new InsnList();
+        tail.add(handler);
+        tail.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        tail.add(new InsnNode(Opcodes.ICONST_0));
+        tail.add(new FieldInsnNode(Opcodes.PUTFIELD, EVENT_HANDLER_INTERNAL, GUARD_FIELD, "Z"));
+        tail.add(new InsnNode(Opcodes.ATHROW));
+        tail.add(skip);
+        tail.add(new InsnNode(Opcodes.RETURN));
+        target.instructions.add(tail);
+
+        target.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
     }
 
     private static class SafeClassWriter extends ClassWriter {
