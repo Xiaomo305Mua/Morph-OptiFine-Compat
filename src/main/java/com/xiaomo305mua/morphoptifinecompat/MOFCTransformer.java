@@ -35,11 +35,21 @@ public class MOFCTransformer implements IClassTransformer {
         }
         String n = name.replace('/', '.');
         String tn = transformedName == null ? "" : transformedName.replace('/', '.');
-        if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
-            return patchEventHandler(basicClass);
+        if (n.contains("morph") || n.contains("EventHandler") || n.contains("ModelHelper")) {
+            System.out.println("[MOFC] transform name=" + name);
         }
-        if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
-            return patchModelHelper(basicClass);
+        try {
+            if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
+                System.out.println("[MOFC] patching EventHandler");
+                return patchEventHandler(basicClass);
+            }
+            if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
+                System.out.println("[MOFC] patching ModelHelper");
+                return patchModelHelper(basicClass);
+            }
+        } catch (Throwable t) {
+            System.out.println("[MOFC] patch threw: " + t);
+            t.printStackTrace();
         }
         return basicClass;
     }
@@ -74,6 +84,7 @@ public class MOFCTransformer implements IClassTransformer {
             classNode.methods.add(buildDeleteDisplayListSafe());
             patched = true;
         }
+        System.out.println("[MOFC] ModelHelper redirected=" + redirected + " helper=" + hasHelper + " patched=" + patched);
         if (!patched) {
             return bytes;
         }
@@ -175,6 +186,7 @@ public class MOFCTransformer implements IClassTransformer {
             target.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
             patched = true;
         }
+        System.out.println("[MOFC] EventHandler field=" + hasField + " target=" + (target != null) + " patched=" + patched);
         if (!patched) {
             return bytes;
         }
