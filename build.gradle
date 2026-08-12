@@ -28,7 +28,7 @@ minecraft {
     replace "@modDependencies@", "required-after:" + modDependencies + ";"
 
     replaceIn "MOFCCoreMod.java"
-    replace "@mcVersion@", project.minecraft.version
+    replace "@mcVersion@", project.minecraft.version.split('-')[0]
 }
 
 processResources {
@@ -41,7 +41,7 @@ processResources {
         'modName'         : p('modName'),
         'modDescription'  : p('modDescription'),
         'modVersion'      : p('modVersion'),
-        'minecraftVersion': p('minecraftVersion'),
+        'minecraftVersion': project.minecraft.version.split('-')[0],
         'modUrl'          : p('modUrl'),
         'authorList'      : p('authorList'),
         'credits'         : p('credits'),
