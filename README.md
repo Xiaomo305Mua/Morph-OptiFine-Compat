@@ -3,7 +3,7 @@
 [English](./README.md) | [简体中文]
 
 <p align="center">
-  <img src="resources/Logo.png" width="450">
+  <img src="resources/Logo.png" width="256">
 </p>
 
 使 [变身](https://www.curseforge.com/minecraft/mc-mods/morph) 兼容 [高清修复](https://optifine.net/home)
