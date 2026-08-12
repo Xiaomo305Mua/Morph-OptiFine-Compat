@@ -12,22 +12,40 @@ import org.objectweb.asm.Opcodes;
 
 public class MOFCTransformer implements IClassTransformer {
 
-    private static final String EVENT_HANDLER = "morph/common/core/EventHandler";
-    private static final String MODEL_HELPER = "morph/client/model/ModelHelper";
+    private static final String EVENT_HANDLER = "morph.common.core.EventHandler";
+    private static final String MODEL_HELPER = "morph.client.model.ModelHelper";
     private static final String RENDER_HAND_EVENT = "net/minecraftforge/client/event/RenderHandEvent";
     private static final String GL_ALLOCATION = "net/minecraft/client/renderer/GLAllocation";
     private static final String GL11 = "org/lwjgl/opengl/GL11";
+
+    private static int callCount;
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
         if (basicClass == null) {
             return null;
         }
-        if (name.equals(EVENT_HANDLER) || transformedName.equals(EVENT_HANDLER)) {
-            return patchEventHandler(basicClass);
+        callCount++;
+        if (callCount % 500 == 0) {
+            System.out.println("[MOFC] transform alive count=" + callCount);
         }
-        if (name.equals(MODEL_HELPER) || transformedName.equals(MODEL_HELPER)) {
-            return patchModelHelper(basicClass);
+        String n = name.replace('/', '.');
+        if (n.contains("morph") || n.contains("EventHandler") || n.contains("ModelHelper") || n.contains("GLAllocation")) {
+            System.out.println("[MOFC] saw: " + name);
+        }
+        try {
+            String tn = transformedName == null ? "" : transformedName.replace('/', '.');
+            if (n.equals(EVENT_HANDLER) || tn.equals(EVENT_HANDLER)) {
+                System.out.println("[MOFC] patching EventHandler");
+                return patchEventHandler(basicClass);
+            }
+            if (n.equals(MODEL_HELPER) || tn.equals(MODEL_HELPER)) {
+                System.out.println("[MOFC] patching ModelHelper");
+                return patchModelHelper(basicClass);
+            }
+        } catch (Throwable t) {
+            System.out.println("[MOFC] patch threw: " + t);
+            t.printStackTrace();
         }
         return basicClass;
     }
@@ -38,6 +56,7 @@ public class MOFCTransformer implements IClassTransformer {
         cr.accept(new ClassVisitor(Opcodes.ASM4, cw) {
 
             private boolean hasField;
+            private boolean patched;
 
             @Override
             public FieldVisitor visitField(int access, String fname, String fdesc, String signature, Object value) {
@@ -51,6 +70,7 @@ public class MOFCTransformer implements IClassTransformer {
             public MethodVisitor visitMethod(int access, String mname, String mdesc, String signature, String[] exceptions) {
                 MethodVisitor mv = super.visitMethod(access, mname, mdesc, signature, exceptions);
                 if (mname.equals("onRenderHand") && mdesc.equals("(" + RENDER_HAND_EVENT + ")V")) {
+                    patched = true;
                     return new GuardMethodVisitor(mv);
                 }
                 return mv;
@@ -62,6 +82,7 @@ public class MOFCTransformer implements IClassTransformer {
                     super.visitField(Opcodes.ACC_PRIVATE, "renderingMorphHand", "Z", null, null);
                 }
                 super.visitEnd();
+                System.out.println("[MOFC] EventHandler done patched=" + patched + " field=" + hasField);
             }
         }, 0);
         return cw.toByteArray();
@@ -73,6 +94,7 @@ public class MOFCTransformer implements IClassTransformer {
         cr.accept(new ClassVisitor(Opcodes.ASM4, cw) {
 
             private boolean hasHelper;
+            private int redirected;
 
             @Override
             public MethodVisitor visitMethod(int access, String mname, String mdesc, String signature, String[] exceptions) {
@@ -87,6 +109,7 @@ public class MOFCTransformer implements IClassTransformer {
                                 && owner.equals(GL_ALLOCATION)
                                 && (mname.equals("func_74523_b") || mname.equals("deleteDisplayLists"))
                                 && mdesc.equals("(I)V")) {
+                            redirected++;
                             super.visitMethodInsn(Opcodes.INVOKESTATIC, MODEL_HELPER, "deleteDisplayListSafe", "(I)V", false);
                         } else {
                             super.visitMethodInsn(opcode, owner, mname, mdesc, itf);
@@ -101,6 +124,7 @@ public class MOFCTransformer implements IClassTransformer {
                     addDeleteDisplayListSafe(super.visitMethod(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, "deleteDisplayListSafe", "(I)V", null, null));
                 }
                 super.visitEnd();
+                System.out.println("[MOFC] ModelHelper done redirected=" + redirected + " helper=" + hasHelper);
             }
         }, 0);
         return cw.toByteArray();
